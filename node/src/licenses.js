@@ -17,44 +17,53 @@ function sendError(res, err) {
   if (err instanceof ConflictError) {
     return res.status(409).json({ error: err.message });
   }
+  console.error(err);
   return res.status(500).json({ error: "internal server error" });
 }
 
 function createLicensesRouter(store) {
   const router = express.Router();
 
-  router.get("/", (_req, res) => {
-    res.status(200).json(store.list());
+  router.get("/", async (_req, res) => {
+    try {
+      res.status(200).json(await store.list());
+    } catch (err) {
+      sendError(res, err);
+    }
   });
 
-  router.post("/", (req, res) => {
+  router.post("/", async (req, res) => {
     try {
-      const created = store.create(req.body);
+      const created = await store.create(req.body);
       res.status(201).json(created);
     } catch (err) {
       sendError(res, err);
     }
   });
 
-  router.get("/:id", (req, res) => {
-    const id = parseId(req, res);
-    if (id === null) {
-      return;
-    }
-    const license = store.getById(id);
-    if (!license) {
-      return res.status(404).json({ error: "license not found" });
-    }
-    res.status(200).json(license);
-  });
-
-  router.put("/:id", (req, res) => {
+  router.get("/:id", async (req, res) => {
     const id = parseId(req, res);
     if (id === null) {
       return;
     }
     try {
-      const updated = store.update(id, req.body);
+      const license = await store.getById(id);
+      if (!license) {
+        return res.status(404).json({ error: "license not found" });
+      }
+      res.status(200).json(license);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.put("/:id", async (req, res) => {
+    const id = parseId(req, res);
+    if (id === null) {
+      return;
+    }
+    try {
+      const updated = await store.update(id, req.body);
       if (!updated) {
         return res.status(404).json({ error: "license not found" });
       }
@@ -64,15 +73,20 @@ function createLicensesRouter(store) {
     }
   });
 
-  router.delete("/:id", (req, res) => {
+  router.delete("/:id", async (req, res) => {
     const id = parseId(req, res);
     if (id === null) {
       return;
     }
-    if (!store.remove(id)) {
-      return res.status(404).json({ error: "license not found" });
+    try {
+      const deleted = await store.remove(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "license not found" });
+      }
+      res.status(204).send();
+    } catch (err) {
+      sendError(res, err);
     }
-    res.status(204).send();
   });
 
   router.all(["/", "/:id"], (_req, res) => {

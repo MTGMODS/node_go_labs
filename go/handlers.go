@@ -56,16 +56,27 @@ func handleStoreError(w http.ResponseWriter, err error) {
 }
 
 type healthResponse struct {
-	Status  string `json:"status"`
-	Service string `json:"service"`
-	Runtime string `json:"runtime"`
+	Status   string `json:"status"`
+	Service  string `json:"service"`
+	Runtime  string `json:"runtime"`
+	Database string `json:"database"`
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	if err := s.store.Ping(); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, healthResponse{
+			Status:   "DOWN",
+			Service:  "license-service",
+			Runtime:  "go",
+			Database: "DOWN",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, healthResponse{
-		Status:  "UP",
-		Service: "license-service",
-		Runtime: "go",
+		Status:   "UP",
+		Service:  "license-service",
+		Runtime:  "go",
+		Database: "UP",
 	})
 }
 
@@ -74,7 +85,12 @@ func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) listLicenses(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.List())
+	items, err := s.store.List()
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) createLicense(w http.ResponseWriter, r *http.Request) {

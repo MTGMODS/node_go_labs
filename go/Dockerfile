@@ -1,9 +1,10 @@
 FROM golang:1.22-alpine AS build
 
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY *.go ./
-RUN go build -o /license-service .
+RUN CGO_ENABLED=0 go build -o /license-service .
 
 FROM alpine:3.20
 

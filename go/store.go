@@ -1,10 +1,11 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
-	"sort"
 	"strings"
-	"sync"
+
+	"github.com/lib/pq"
 )
 
 var allowedStatuses = map[string]struct{}{
@@ -47,58 +48,63 @@ type LicensePayload struct {
 }
 
 type Store struct {
-	// Як dict, але з lock: у Go кожен HTTP-запит іде в окремій goroutine.
-	mu       sync.RWMutex
-	licenses map[int]License
-	nextID   int
+	db *sql.DB
 }
 
-func NewStore() *Store {
-	s := &Store{
-		licenses: make(map[int]License),
-		nextID:   2,
-	}
-	s.licenses[1] = License{
-		ID:           1,
-		Key:          "MTGM-VIP1-AAAA-0001",
-		Product:      "MTG MODS VIP",
-		Owner:        "bogdan",
-		Status:       "ACTIVE",
-		DurationDays: 30,
-		MaxDevices:   2,
-	}
-	return s
+func NewStore(db *sql.DB) *Store {
+	return &Store{db: db}
 }
 
-func (s *Store) List() []License {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *Store) Ping() error {
+	return s.db.Ping()
+}
 
-	items := make([]License, 0, len(s.licenses))
-	for _, license := range s.licenses {
+const licenseColumns = "id, key, product, owner, status, duration_days, max_devices"
+
+func scanLicense(scanner interface{ Scan(dest ...any) error }) (License, error) {
+	var license License
+	err := scanner.Scan(
+		&license.ID,
+		&license.Key,
+		&license.Product,
+		&license.Owner,
+		&license.Status,
+		&license.DurationDays,
+		&license.MaxDevices,
+	)
+	return license, err
+}
+
+func (s *Store) List() ([]License, error) {
+	rows, err := s.db.Query("SELECT " + licenseColumns + " FROM licenses ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]License, 0)
+	for rows.Next() {
+		license, err := scanLicense(rows)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, license)
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].ID < items[j].ID
-	})
-	return items
+	return items, rows.Err()
 }
 
 func (s *Store) Get(id int) (License, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	license, ok := s.licenses[id]
-	if !ok {
+	license, err := scanLicense(s.db.QueryRow(
+		"SELECT "+licenseColumns+" FROM licenses WHERE id = $1",
+		id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
 		return License{}, errNotFound
 	}
-	return license, nil
+	return license, err
 }
 
 func (s *Store) Create(payload LicensePayload) (License, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	data, err := applyPayload(License{
 		Status:       "NOT_ACTIVATED",
 		DurationDays: 30,
@@ -107,55 +113,67 @@ func (s *Store) Create(payload LicensePayload) (License, error) {
 	if err != nil {
 		return License{}, err
 	}
-	if err := s.assertUniqueKey(data.Key, 0); err != nil {
-		return License{}, err
-	}
 
-	data.ID = s.nextID
-	s.nextID++
-	s.licenses[data.ID] = data
-	return data, nil
+	license, err := scanLicense(s.db.QueryRow(
+		`INSERT INTO licenses (key, product, owner, status, duration_days, max_devices)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING `+licenseColumns,
+		data.Key, data.Product, data.Owner, data.Status, data.DurationDays, data.MaxDevices,
+	))
+	if err != nil {
+		return License{}, mapDBError(err)
+	}
+	return license, nil
 }
 
 func (s *Store) Update(id int, payload LicensePayload) (License, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	existing, ok := s.licenses[id]
-	if !ok {
-		return License{}, errNotFound
+	existing, err := s.Get(id)
+	if err != nil {
+		return License{}, err
 	}
 
 	data, err := applyPayload(existing, payload, false)
 	if err != nil {
 		return License{}, err
 	}
-	if err := s.assertUniqueKey(data.Key, id); err != nil {
-		return License{}, err
-	}
 
-	s.licenses[id] = data
-	return data, nil
+	license, err := scanLicense(s.db.QueryRow(
+		`UPDATE licenses
+		 SET key = $1, product = $2, owner = $3, status = $4, duration_days = $5, max_devices = $6
+		 WHERE id = $7
+		 RETURNING `+licenseColumns,
+		data.Key, data.Product, data.Owner, data.Status, data.DurationDays, data.MaxDevices, id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return License{}, errNotFound
+	}
+	if err != nil {
+		return License{}, mapDBError(err)
+	}
+	return license, nil
 }
 
 func (s *Store) Delete(id int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.licenses[id]; !ok {
+	result, err := s.db.Exec("DELETE FROM licenses WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
 		return errNotFound
 	}
-	delete(s.licenses, id)
 	return nil
 }
 
-func (s *Store) assertUniqueKey(key string, currentID int) error {
-	for _, license := range s.licenses {
-		if license.Key == key && license.ID != currentID {
-			return errConflict
-		}
+func mapDBError(err error) error {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		return errConflict
 	}
-	return nil
+	return err
 }
 
 func applyPayload(base License, payload LicensePayload, creating bool) (License, error) {

@@ -1,3 +1,5 @@
+const { Pool } = require("pg");
+
 const ALLOWED_STATUSES = new Set([
   "NOT_ACTIVATED",
   "ACTIVE",
@@ -19,63 +21,89 @@ class ConflictError extends Error {
   }
 }
 
+const SELECT_COLUMNS = "id, key, product, owner, status, duration_days, max_devices";
+
+function mapRow(row) {
+  return {
+    id: row.id,
+    key: row.key,
+    product: row.product,
+    owner: row.owner,
+    status: row.status,
+    duration_days: row.duration_days,
+    max_devices: row.max_devices,
+  };
+}
+
 class Store {
-  constructor() {
-    // Map ≈ dict у Python. Node однопотоковий, lock не потрібен.
-    this.licenses = new Map();
-    this.nextId = 1;
-    this.seed();
+  constructor(databaseUrl) {
+    this.pool = new Pool({ connectionString: databaseUrl });
   }
 
-  seed() {
-    this.create({
-      key: "MTGM-VIP1-AAAA-0001",
-      product: "MTG MODS VIP",
-      owner: "bogdan",
-      status: "ACTIVE",
-      duration_days: 30,
-      max_devices: 2,
-    });
+  async ping() {
+    await this.pool.query("SELECT 1");
   }
 
-  list() {
-    return Array.from(this.licenses.values());
+  async list() {
+    const { rows } = await this.pool.query(
+      `SELECT ${SELECT_COLUMNS} FROM licenses ORDER BY id`,
+    );
+    return rows.map(mapRow);
   }
 
-  getById(id) {
-    return this.licenses.get(id) || null;
+  async getById(id) {
+    const { rows } = await this.pool.query(
+      `SELECT ${SELECT_COLUMNS} FROM licenses WHERE id = $1`,
+      [id],
+    );
+    return rows[0] ? mapRow(rows[0]) : null;
   }
 
-  create(body) {
+  async create(body) {
     const data = this.normalize(body, null);
-    this.assertUniqueKey(data.key, null);
-    const license = { id: this.nextId++, ...data };
-    this.licenses.set(license.id, license);
-    return license;
+    try {
+      const { rows } = await this.pool.query(
+        `INSERT INTO licenses (key, product, owner, status, duration_days, max_devices)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING ${SELECT_COLUMNS}`,
+        [data.key, data.product, data.owner, data.status, data.duration_days, data.max_devices],
+      );
+      return mapRow(rows[0]);
+    } catch (err) {
+      this.rethrow(err);
+    }
   }
 
-  update(id, body) {
-    const existing = this.licenses.get(id);
+  async update(id, body) {
+    const existing = await this.getById(id);
     if (!existing) {
       return null;
     }
     const data = this.normalize(body, existing);
-    this.assertUniqueKey(data.key, id);
-    const license = { id, ...data };
-    this.licenses.set(id, license);
-    return license;
-  }
-
-  remove(id) {
-    return this.licenses.delete(id);
-  }
-
-  assertUniqueKey(key, currentId) {
-    for (const license of this.licenses.values()) {
-      if (license.key === key && license.id !== currentId) {
-        throw new ConflictError("license key already exists");
-      }
+    try {
+      const { rows } = await this.pool.query(
+        `UPDATE licenses
+         SET key = $1, product = $2, owner = $3, status = $4, duration_days = $5, max_devices = $6
+         WHERE id = $7
+         RETURNING ${SELECT_COLUMNS}`,
+        [data.key, data.product, data.owner, data.status, data.duration_days, data.max_devices, id],
+      );
+      return rows[0] ? mapRow(rows[0]) : null;
+    } catch (err) {
+      this.rethrow(err);
     }
+  }
+
+  async remove(id) {
+    const result = await this.pool.query("DELETE FROM licenses WHERE id = $1", [id]);
+    return result.rowCount > 0;
+  }
+
+  rethrow(err) {
+    if (err && err.code === "23505") {
+      throw new ConflictError("license key already exists");
+    }
+    throw err;
   }
 
   normalize(body, existing) {
