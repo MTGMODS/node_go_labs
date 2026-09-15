@@ -153,6 +153,19 @@ func (s *Server) deleteLicense(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
@@ -165,7 +178,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/licenses", methodNotAllowed)
 	mux.HandleFunc("/licenses/{id}", methodNotAllowed)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
 		if pattern == "" {
 			writeError(w, http.StatusNotFound, "not found")
@@ -173,4 +186,5 @@ func (s *Server) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+	return withCORS(inner)
 }
