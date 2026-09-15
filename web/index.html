@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>License CRUD playground</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --card: #fffdf8;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --line: #e7e0d4;
+      --accent: #0f766e;
+      --ok: #166534;
+      --bad: #b45309;
+      --fail: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      padding: 24px 20px 8px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; }
+    .lead { margin: 0; color: var(--muted); max-width: 70ch; }
+    .runtime {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0 0;
+    }
+    .runtime label {
+      border: 1px solid var(--line);
+      background: var(--card);
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .runtime input { accent-color: var(--accent); }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 20px 48px;
+      display: grid;
+      gap: 14px;
+    }
+    article {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    article h2 {
+      margin: 0 0 4px;
+      font-size: 1rem;
+    }
+    .desc { margin: 0 0 12px; color: var(--muted); font-size: 0.92rem; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    label.field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    input, select, button, pre {
+      font: inherit;
+    }
+    input, select {
+      min-width: 140px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    pre {
+      margin: 0;
+      background: #1c1917;
+      color: #f5f5f4;
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      min-height: 4.5rem;
+      white-space: pre-wrap;
+    }
+    pre.ok { box-shadow: inset 3px 0 0 var(--ok); }
+    pre.bad { box-shadow: inset 3px 0 0 var(--bad); }
+    pre.fail { box-shadow: inset 3px 0 0 var(--fail); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>License service playground</h1>
+    <p class="lead">
+      Ті самі запити, що й curl, тільки кнопками. Node і Go дивляться в <strong>одну PostgreSQL</strong>:
+      створив у Node — з’явиться і в Go.
+    </p>
+    <div class="runtime">
+      <label><input type="radio" name="runtime" value="/api/node" checked> Node (3000)</label>
+      <label><input type="radio" name="runtime" value="/api/go"> Go (8080)</label>
+    </div>
+  </header>
+  <main>
+    <article>
+      <h2>GET /health</h2>
+      <p class="desc">Чи живий сервер і чи відповідає Postgres.</p>
+      <div class="row"><button data-action="health">Надіслати</button></div>
+      <pre id="out-health">натисни кнопку</pre>
+    </article>
+
+    <article>
+      <h2>GET /licenses</h2>
+      <p class="desc">Список усіх ліцензій з БД.</p>
+      <div class="row"><button data-action="list">Надіслати</button></div>
+      <pre id="out-list">натисни кнопку</pre>
+    </article>
+
+    <article>
+      <h2>GET /licenses/:id</h2>
+      <p class="desc">Одна ліцензія за id. Якщо немає — 404.</p>
+      <div class="row">
+        <label class="field">id <input id="get-id" type="number" min="1" value="1"></label>
+        <button data-action="get">Надіслати</button>
+      </div>
+      <pre id="out-get">натисни кнопку</pre>
+    </article>
+
+    <article>
+      <h2>POST /licenses</h2>
+      <p class="desc">Створити. Обов’язкові: key, product, owner. Успіх — 201.</p>
+      <div class="row">
+        <label class="field">key <input id="post-key" value="MTGM-VIP1-AAAA-0002"></label>
+        <label class="field">product <input id="post-product" value="MTG MODS VIP"></label>
+        <label class="field">owner <input id="post-owner" value="student"></label>
+        <label class="field">status
+          <select id="post-status">
+            <option value="">(default NOT_ACTIVATED)</option>
+            <option>NOT_ACTIVATED</option>
+            <option>ACTIVE</option>
+            <option>EXPIRED</option>
+            <option>BANNED</option>
+          </select>
+        </label>
+        <label class="field">duration_days <input id="post-days" type="number" min="1" placeholder="30"></label>
+        <label class="field">max_devices <input id="post-devices" type="number" min="1" placeholder="1"></label>
+        <button data-action="create">Надіслати</button>
+      </div>
+      <pre id="out-create">натисни кнопку</pre>
+    </article>
+
+    <article>
+      <h2>PUT /licenses/:id</h2>
+      <p class="desc">Оновити. Порожнє поле не надсилається. Успіх — 200.</p>
+      <div class="row">
+        <label class="field">id <input id="put-id" type="number" min="1" value="1"></label>
+        <label class="field">key <input id="put-key" placeholder="не міняти"></label>
+        <label class="field">product <input id="put-product" placeholder="не міняти"></label>
+        <label class="field">owner <input id="put-owner" placeholder="не міняти"></label>
+        <label class="field">status
+          <select id="put-status">
+            <option value="">(не міняти)</option>
+            <option>NOT_ACTIVATED</option>
+            <option>ACTIVE</option>
+            <option>EXPIRED</option>
+            <option>BANNED</option>
+          </select>
+        </label>
+        <label class="field">duration_days <input id="put-days" type="number" min="1" placeholder="не міняти"></label>
+        <label class="field">max_devices <input id="put-devices" type="number" min="1" placeholder="не міняти"></label>
+        <button data-action="update">Надіслати</button>
+      </div>
+      <pre id="out-update">натисни кнопку</pre>
+    </article>
+
+    <article>
+      <h2>DELETE /licenses/:id</h2>
+      <p class="desc">Видалити. Успіх — 204 без тіла. Повторний виклик — 404.</p>
+      <div class="row">
+        <label class="field">id <input id="del-id" type="number" min="1" value="2"></label>
+        <button data-action="remove">Надіслати</button>
+      </div>
+      <pre id="out-remove">натисни кнопку</pre>
+    </article>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function baseUrl() {
+      return document.querySelector("input[name=runtime]:checked").value;
+    }
+
+    function numOrSkip(value) {
+      if (value === "") return undefined;
+      return Number(value);
+    }
+
+    function compact(obj) {
+      const out = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined && value !== "") out[key] = value;
+      }
+      return out;
+    }
+
+    async function send(outId, method, path, body) {
+      const el = $(outId);
+      el.className = "";
+      el.textContent = "запит...";
+      try {
+        const options = { method, headers: {} };
+        if (body !== undefined) {
+          options.headers["Content-Type"] = "application/json";
+          options.body = JSON.stringify(body);
+        }
+        const res = await fetch(baseUrl() + path, options);
+        const text = await res.text();
+        let pretty = text || "(no body)";
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+        el.textContent = method + " " + path + "\nHTTP " + res.status + " " + res.statusText + "\n\n" + pretty;
+        el.classList.add(res.status < 300 ? "ok" : res.status < 500 ? "bad" : "fail");
+      } catch (err) {
+        el.textContent = String(err);
+        el.classList.add("fail");
+      }
+    }
+
+    const actions = {
+      health: () => send("out-health", "GET", "/health"),
+      list: () => send("out-list", "GET", "/licenses"),
+      get: () => send("out-get", "GET", "/licenses/" + $("get-id").value),
+      create: () => send("out-create", "POST", "/licenses", compact({
+        key: $("post-key").value,
+        product: $("post-product").value,
+        owner: $("post-owner").value,
+        status: $("post-status").value,
+        duration_days: numOrSkip($("post-days").value),
+        max_devices: numOrSkip($("post-devices").value),
+      })),
+      update: () => send("out-update", "PUT", "/licenses/" + $("put-id").value, compact({
+        key: $("put-key").value,
+        product: $("put-product").value,
+        owner: $("put-owner").value,
+        status: $("put-status").value,
+        duration_days: numOrSkip($("put-days").value),
+        max_devices: numOrSkip($("put-devices").value),
+      })),
+      remove: () => send("out-remove", "DELETE", "/licenses/" + $("del-id").value),
+    };
+
+    document.querySelectorAll("button[data-action]").forEach((button) => {
+      button.addEventListener("click", () => actions[button.dataset.action]());
+    });
+  </script>
+</body>
+</html>
