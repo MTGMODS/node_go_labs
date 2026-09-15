@@ -206,9 +206,30 @@
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
+    const OUT_IDS = ["out-health", "out-list", "out-get", "out-create", "out-update", "out-remove"];
+    const EMPTY = { text: "натисни кнопку", className: "" };
+    const views = {};
 
     function baseUrl() {
       return document.querySelector("input[name=runtime]:checked").value;
+    }
+
+    function snapshot() {
+      const state = {};
+      for (const id of OUT_IDS) {
+        const el = $(id);
+        state[id] = { text: el.textContent, className: el.className };
+      }
+      return state;
+    }
+
+    function paint(state) {
+      for (const id of OUT_IDS) {
+        const el = $(id);
+        const item = (state && state[id]) || EMPTY;
+        el.textContent = item.text;
+        el.className = item.className;
+      }
     }
 
     function numOrSkip(value) {
@@ -225,24 +246,37 @@
     }
 
     async function send(outId, method, path, body) {
+      const runtime = baseUrl();
       const el = $(outId);
       el.className = "";
       el.textContent = "запит...";
+      views[runtime] = snapshot();
       try {
         const options = { method, headers: {} };
         if (body !== undefined) {
           options.headers["Content-Type"] = "application/json";
           options.body = JSON.stringify(body);
         }
-        const res = await fetch(baseUrl() + path, options);
+        const res = await fetch(runtime + path, options);
         const text = await res.text();
         let pretty = text || "(no body)";
         try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
-        el.textContent = method + " " + path + "\nHTTP " + res.status + " " + res.statusText + "\n\n" + pretty;
-        el.classList.add(res.status < 300 ? "ok" : res.status < 500 ? "bad" : "fail");
+        const next = {
+          text: method + " " + path + "\nHTTP " + res.status + " " + res.statusText + "\n\n" + pretty,
+          className: res.status < 300 ? "ok" : res.status < 500 ? "bad" : "fail",
+        };
+        views[runtime] = { ...(views[runtime] || {}), [outId]: next };
+        if (baseUrl() === runtime) {
+          el.textContent = next.text;
+          el.className = next.className;
+        }
       } catch (err) {
-        el.textContent = String(err);
-        el.classList.add("fail");
+        const next = { text: String(err), className: "fail" };
+        views[runtime] = { ...(views[runtime] || {}), [outId]: next };
+        if (baseUrl() === runtime) {
+          el.textContent = next.text;
+          el.className = next.className;
+        }
       }
     }
 
@@ -271,6 +305,12 @@
 
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.addEventListener("click", () => actions[button.dataset.action]());
+    });
+
+    document.querySelectorAll("input[name=runtime]").forEach((input) => {
+      input.addEventListener("change", () => {
+        paint(views[baseUrl()]);
+      });
     });
   </script>
 </body>
