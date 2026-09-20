@@ -69,5 +69,17 @@ services:
       go:
         condition: service_healthy
 
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["benchmark"]
+    volumes:
+      - ./bench:/scripts:ro
+      - ./bench/results:/results
+    depends_on:
+      node:
+        condition: service_healthy
+      go:
+        condition: service_healthy
+
 volumes:
   pgdata:
