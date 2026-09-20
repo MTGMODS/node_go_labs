@@ -1,6 +1,9 @@
 # node_go_labs
 
-Лабораторна 1: два однакових HTTP-сервіси (CRUD + `/health`) на **Node.js** і **Go**.
+Лабораторні роботи з порівняння серверних моделей **Node.js** і **Go**:
+
+- лабораторна 1: однаковий CRUD + `/health`;
+- лабораторна 2: I/O та CPU навантаження, блокування event loop, goroutines і benchmark.
 
 Тема — спрощений `license-service` з [license-management-platform](https://github.com/MTGMODS/license-management-platform): ліцензійні ключі в **спільній PostgreSQL**. Без JWT і ботів.
 
@@ -12,6 +15,7 @@
 | `go/` | `net/http` | http://localhost:8080 |
 | `postgres/` | PostgreSQL 16 | localhost:5433 (`labs` / `labs` / `licenses`) |
 | `web/` | HTML + nginx | http://localhost:8081 |
+| `bench/` | k6 + PowerShell | сценарії лабораторної 2 |
 
 Node і Go на комп ставити не потрібно. Потрібен лише Docker.
 
@@ -66,7 +70,7 @@ curl.exe -X POST http://localhost:3000/licenses -H "Content-Type: application/js
 
 Те саме на `8080` для Go.
 
-## Якщо ти з Python
+## Аналогія з Python
 
 | Python | Node | Go |
 | --- | --- | --- |
@@ -75,10 +79,46 @@ curl.exe -X POST http://localhost:3000/licenses -H "Content-Type: application/js
 | Pydantic | `readString` / `readInt` | `LicensePayload` + `applyPayload` |
 | `uvicorn` | `app.listen(...)` | `http.ListenAndServe(...)` |
 
-## Захист лаби: що сказати
+## Лабораторна 2: I/O та CPU
 
-1. Два сервіси з **однаковим** REST API, різниця лише в рантаймі.
-2. Сховище — **спільна PostgreSQL** у Docker; Node і Go не тримають свої копії даних.
-3. `/health` перевіряє процес і ping до БД.
-4. Коди: 201 створення, 204 видалення, 404 немає id, 409 дубль `key`.
-5. Node: Express + event loop. Go: `net/http` + goroutines. HTML у `web/` лише клієнт, логіки CRUD там немає.
+Нові endpoint-и мають однакові параметри, щоб сервіси виконували однаковий обсяг роботи.
+
+| Runtime | Метод і шлях | Реалізація |
+| --- | --- | --- |
+| Node | `GET /io?delay_ms=1000` | асинхронний `setTimeout`, event loop не блокується |
+| Go | `GET /io?delay_ms=1000` | `time.Timer`, блокується лише goroutine запиту |
+| Node | `GET /cpu?iterations=75000000&tasks=4` | синхронні цикли в main thread |
+| Go | `GET /cpu` або `/cpu/sequential` | ті самі цикли послідовно |
+| Go | `GET /cpu/parallel` | ті самі цикли в окремих goroutines |
+
+У CPU-відповіді `result` завжди дорівнює `tasks * iterations`. Це підтверджує, що sequential та parallel варіанти виконали однаковий обсяг роботи.
+
+Швидка ручна перевірка:
+
+```powershell
+curl.exe "http://localhost:3000/io?delay_ms=1000"
+curl.exe "http://localhost:8080/io?delay_ms=1000"
+curl.exe "http://localhost:3000/cpu?iterations=75000000&tasks=4"
+curl.exe "http://localhost:8080/cpu/sequential?iterations=75000000&tasks=4"
+curl.exe "http://localhost:8080/cpu/parallel?iterations=75000000&tasks=4"
+```
+
+Поведінка `/health` під час CPU-запиту:
+
+```powershell
+./bench/check-health-during-cpu.ps1
+```
+
+Скрипт спочатку запускає важкий CPU-запит, потім надсилає п'ять `/health` запитів. Для Node перший health чекає завершення CPU-циклу. Go scheduler продовжує планувати health handler, тому він відповідає під час CPU-роботи.
+
+Повний benchmark:
+
+```powershell
+./bench/run-benchmarks.ps1
+```
+
+Він послідовно запускає п'ять k6-сценаріїв, паралельно збирає `docker stats` і записує:
+
+- підсумкову таблицю в `bench/results.md`;
+- health-експеримент у `bench/health-results.md`;
+- raw JSON/CSV у `bench/results/`.
