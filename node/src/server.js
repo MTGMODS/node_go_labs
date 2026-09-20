@@ -1,6 +1,7 @@
 const express = require("express");
 const { Store } = require("./store");
 const { createLicensesRouter } = require("./licenses");
+const { createWorkloadsRouter } = require("./workloads");
 
 const port = Number(process.env.PORT) || 3000;
 const databaseUrl = process.env.DATABASE_URL;
@@ -50,6 +51,7 @@ async function main() {
   });
 
   app.use("/licenses", createLicensesRouter(store));
+  app.use(createWorkloadsRouter());
 
   app.use((err, _req, res, next) => {
     if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
