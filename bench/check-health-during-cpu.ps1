@@ -70,12 +70,6 @@ try {
   $nodeFirst = $rows | Where-Object { $_.Runtime -eq "Node.js" -and $_.Request -eq 1 }
   $goSequentialFirst = $rows | Where-Object { $_.Runtime -eq "Go" -and $_.Variant -eq "sequential" -and $_.Request -eq 1 }
   $goParallelFirst = $rows | Where-Object { $_.Runtime -eq "Go" -and $_.Variant -eq "goroutines" -and $_.Request -eq 1 }
-  $lines += @(
-    "",
-    "## Спостереження",
-    "",
-    "Перший Node.js health-запит очікував $($nodeFirst.HealthLatencyMS) мс, тобто майже всю тривалість CPU-запиту. Go відповідав під час обчислення: $($goSequentialFirst.HealthLatencyMS) мс для sequential CPU та $($goParallelFirst.HealthLatencyMS) мс для goroutines."
-  )
   $lines | Set-Content -LiteralPath $reportPath -Encoding utf8
   Write-Host "Health experiment report: $reportPath"
   $rows | Format-Table -AutoSize
