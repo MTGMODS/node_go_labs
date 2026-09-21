@@ -134,13 +134,13 @@ try {
   $goParallel = $rows | Where-Object Id -eq "go-cpu-parallel"
   $lines += @(
     "",
-    "## Спостереження",
+    "## Observations",
     "",
-    "- I/O throughput майже однаковий: $(Format-Number $nodeIO.RPS) RPS для Node.js і $(Format-Number $goIO.RPS) RPS для Go. За 30 VUs і затримки 100 мс обидва runtime наблизились до теоретичної межі 300 RPS.",
-    "- Go sequential CPU має в $(Format-Number ($goSequential.RPS / $nodeCPU.RPS)) раза вищий RPS за Node.js для однакової роботи на запит.",
-    "- Go goroutines має в $(Format-Number ($goParallel.RPS / $goSequential.RPS)) раза вищий RPS за Go sequential і в $(Format-Number ($goParallel.RPS / $nodeCPU.RPS)) раза вищий за Node.js у цьому прогоні.",
-    "- Node.js використовує приблизно одне повне CPU-ядро. Docker CPU понад 100% для Go означає одночасне використання кількох ядер, а не помилку вимірювання.",
-    "- Значення характеризують цей комп'ютер і поточні Docker CPU limits. Після зміни середовища benchmark потрібно повторити."
+    "- I/O throughput is almost identical: $(Format-Number $nodeIO.RPS) RPS for Node.js and $(Format-Number $goIO.RPS) RPS for Go. With 30 VUs and a 100 ms delay, both runtimes approached the theoretical limit of 300 RPS.",
+    "- Go sequential CPU has $(Format-Number ($goSequential.RPS / $nodeCPU.RPS))x the RPS of Node.js for the same amount of work per request.",
+    "- Go goroutines has $(Format-Number ($goParallel.RPS / $goSequential.RPS))x the RPS of Go sequential and $(Format-Number ($goParallel.RPS / $nodeCPU.RPS))x the RPS of Node.js in this run.",
+    "- Node.js uses approximately one full CPU core. Docker CPU above 100% for Go means multiple cores are being used concurrently; it is not a measurement error.",
+    "- These values describe this computer and its current Docker CPU limits. Repeat the benchmark after changing the environment."
   )
   $lines | Set-Content -LiteralPath $reportPath -Encoding utf8
 

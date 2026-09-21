@@ -70,6 +70,12 @@ try {
   $nodeFirst = $rows | Where-Object { $_.Runtime -eq "Node.js" -and $_.Request -eq 1 }
   $goSequentialFirst = $rows | Where-Object { $_.Runtime -eq "Go" -and $_.Variant -eq "sequential" -and $_.Request -eq 1 }
   $goParallelFirst = $rows | Where-Object { $_.Runtime -eq "Go" -and $_.Variant -eq "goroutines" -and $_.Request -eq 1 }
+  $lines += @(
+    "",
+    "## Observations",
+    "",
+    "The first Node.js health request waited $($nodeFirst.HealthLatencyMS) ms, almost the full duration of the CPU request. Go responded while computation was running: $($goSequentialFirst.HealthLatencyMS) ms for sequential CPU and $($goParallelFirst.HealthLatencyMS) ms for goroutines."
+  )
   $lines | Set-Content -LiteralPath $reportPath -Encoding utf8
   Write-Host "Health experiment report: $reportPath"
   $rows | Format-Table -AutoSize
