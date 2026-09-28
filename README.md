@@ -3,7 +3,8 @@
 Лабораторні роботи з порівняння серверних моделей **Node.js** і **Go**:
 
 - лабораторна 1: однаковий CRUD + `/health`;
-- лабораторна 2: I/O та CPU навантаження, блокування event loop, goroutines і benchmark.
+- лабораторна 2: I/O та CPU навантаження, блокування event loop, goroutines і benchmark;
+- лабораторна 3: автономний конкурентний pipeline на Go у папці `lab3/`.
 
 Тема — спрощений `license-service` з [license-management-platform](https://github.com/MTGMODS/license-management-platform): ліцензійні ключі в **спільній PostgreSQL**. Без JWT і ботів.
 
@@ -16,6 +17,7 @@
 | `postgres/` | PostgreSQL 16 | localhost:5433 (`labs` / `labs` / `licenses`) |
 | `web/` | HTML + nginx | http://localhost:8081 |
 | `bench/` | k6 + PowerShell | сценарії лабораторної 2 |
+| `lab3/` | Go + окремий Docker Compose | конкурентний pipeline лабораторної 3 |
 
 Node і Go на комп ставити не потрібно. Потрібен лише Docker.
 
