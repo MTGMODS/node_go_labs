@@ -1,0 +1,27 @@
+name: node-go-lab3
+
+services:
+  pipeline:
+    build: .
+    image: node-go-lab3
+    command:
+      - -tasks=10000
+      - -workers=4
+      - -buffer=100
+      - -iterations=10000
+
+  race:
+    image: golang:1.22-bookworm
+    profiles: ["race"]
+    working_dir: /src
+    volumes:
+      - .:/src:ro
+    command:
+      - go
+      - run
+      - -race
+      - .
+      - -tasks=10000
+      - -workers=8
+      - -buffer=100
+      - -iterations=1000
