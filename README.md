@@ -4,7 +4,8 @@
 
 - лабораторна 1: однаковий CRUD + `/health`;
 - лабораторна 2: I/O та CPU навантаження, блокування event loop, goroutines і benchmark;
-- лабораторна 3: автономний конкурентний pipeline на Go у папці `lab3/`.
+- лабораторна 3: автономний конкурентний pipeline на Go у папці `lab3/`;
+- лабораторна 4: багаторівневі Node.js та Go HTTP-сервіси у папці `lab4/`.
 
 Тема — спрощений `license-service` з [license-management-platform](https://github.com/MTGMODS/license-management-platform): ліцензійні ключі в **спільній PostgreSQL**. Без JWT і ботів.
 
@@ -18,6 +19,7 @@
 | `web/` | HTML + nginx | http://localhost:8081 |
 | `bench/` | k6 + PowerShell | сценарії лабораторної 2 |
 | `lab3/` | Go + окремий Docker Compose | конкурентний pipeline лабораторної 3 |
+| `lab4/` | Express + `net/http` | layered architecture, порти 3004 та 8084 |
 
 Node і Go на комп ставити не потрібно. Потрібен лише Docker.
 
