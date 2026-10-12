@@ -1,0 +1,36 @@
+name: node-go-lab5
+
+services:
+  node:
+    build: ./node-service
+    container_name: lab5-license-node
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: "3005"
+      DATA_DIR: "/data"
+    volumes:
+      - ./data/node:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  go:
+    build: ./go-service
+    container_name: lab5-license-go
+    ports:
+      - "8085:8085"
+    environment:
+      PORT: "8085"
+      DATA_DIR: "/data"
+    volumes:
+      - ./data/go:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8085/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
