@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab 5 Streams and WebSockets</title>
+  <style>
+    body { max-width: 900px; margin: 40px auto; font: 16px system-ui; background: #111827; color: #e5e7eb; }
+    button, input, select { padding: 8px; margin: 4px; }
+    pre { min-height: 260px; padding: 16px; overflow: auto; background: #030712; border: 1px solid #374151; }
+  </style>
+</head>
+<body>
+  <h1>Streams and WebSockets demo</h1>
+  <p>WebSocket endpoint: <code>/ws</code>. Progress from stream jobs appears below in real time.</p>
+  <button id="connect">Connect</button>
+  <input id="message" value="Hello from browser">
+  <button id="send">Broadcast</button>
+  <button id="generate">Generate 100 MB source</button>
+  <select id="mode"><option>safe</option><option>unsafe</option></select>
+  <button id="process">Process</button>
+  <pre id="log"></pre>
+  <script>
+    const log = (value) => document.querySelector('#log').textContent += `${value}\n`;
+    let socket;
+    document.querySelector('#connect').onclick = () => {
+      socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+      socket.onmessage = (event) => log(event.data);
+      socket.onclose = () => log('socket closed');
+    };
+    document.querySelector('#send').onclick = () => socket?.send(JSON.stringify({ type: 'message', text: document.querySelector('#message').value }));
+    document.querySelector('#generate').onclick = async () => log(await (await fetch('/streams/source', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"size_mb":100}' })).text());
+    document.querySelector('#process').onclick = async () => log(await (await fetch('/streams/process', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: document.querySelector('#mode').value, slow_delay_ms: 2 }) })).text());
+  </script>
+</body>
+</html>
