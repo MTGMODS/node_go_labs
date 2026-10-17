@@ -166,6 +166,97 @@ docker compose ps
 
 Скрипт перевіряє health, CRUD між двома runtime через спільну реальну БД, `409 Conflict`, Mongo event log, `COMMIT`, `ROLLBACK` і обидва CSV exports.
 
+## Допоміжні скрипти: що вони роблять і навіщо потрібні
+
+Скрипти не містять основної бізнес-логіки застосунку і не замінюють Controller, Service або Repository. Вони потрібні для відтворюваної демонстрації: замість ручного виконання десятків команд запускається один сценарій, який сам перевіряє результат і завершується помилкою, якщо хоча б одна вимога не виконана.
+
+### `scripts/smoke-test.ps1` — повна інтеграційна перевірка лабораторної №6
+
+Запуск:
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+Перед запуском контейнери мають бути підняті через `docker compose up --build -d`. За потреби адреси сервісів можна передати параметрами `-NodeBaseUrl` і `-GoBaseUrl`.
+
+- [`scripts/smoke-test.ps1:1-18`](scripts/smoke-test.ps1#L1-L18) — приймає адреси Node/Go, викликає обидва `/health`, перевіряє статус `UP` і однаковий тип Repository.
+- [`scripts/smoke-test.ps1:20-27`](scripts/smoke-test.ps1#L20-L27) — створює унікальну ліцензію через Node, читає її та оновлює через Go. Це доводить, що обидва runtime працюють зі спільним persistent storage, а не з окремою пам’яттю процесів.
+- [`scripts/smoke-test.ps1:29-35`](scripts/smoke-test.ps1#L29-L35) — повторно надсилає той самий `key`, очікує `409 Conflict`, а потім перевіряє, що MongoDB зберегла події створення й оновлення.
+- [`scripts/smoke-test.ps1:37-41`](scripts/smoke-test.ps1#L37-L41) — запускає CSV export у Node та Go і перевіряє, що обидві потокові реалізації реально обробили записи.
+- [`scripts/smoke-test.ps1:43-54`](scripts/smoke-test.ps1#L43-L54) — перевіряє успішний `COMMIT`, потім навмисно викликає помилку недостатнього балансу та порівнює рахунки до/після, доводячи коректний `ROLLBACK`.
+- [`scripts/smoke-test.ps1:56-67`](scripts/smoke-test.ps1#L56-L67) — видаляє тестову ліцензію та друкує підсумок `PASS`. Унікальний ключ із timestamp не конфліктує з попередніми запусками.
+
+Навіщо потрібен: це не unit-тест, а короткий end-to-end доказ, що запущені контейнери, обидва HTTP-сервіси та реальні PostgreSQL/MongoDB інтегровані правильно.
+
+### `scripts/switch-repository.ps1` — демонстрація заміни Repository
+
+Запуск:
+
+```powershell
+.\scripts\switch-repository.ps1 -Type mongo
+.\scripts\switch-repository.ps1 -Type postgres
+```
+
+- [`scripts/switch-repository.ps1:1-5`](scripts/switch-repository.ps1#L1-L5) — дозволяє лише два коректні значення: `postgres` або `mongo`.
+- [`scripts/switch-repository.ps1:8-20`](scripts/switch-repository.ps1#L8-L20) — знаходить кореневий `.env`, перевіряє наявність `REPO_TYPE` і змінює тільки цей параметр.
+- [`scripts/switch-repository.ps1:22-28`](scripts/switch-repository.ps1#L22-L28) — перестворює лише контейнери `node` і `go`, після чого показує їх стан. Контейнери та volumes баз даних не видаляються.
+
+Навіщо потрібен: наочно показує Dependency Inversion — Controller і Service не змінюються, а конкретна реалізація Repository обирається конфігурацією під час старту.
+
+### `node-service/scripts/ws-database-demo.js` — WebSocket після операції з БД
+
+Запуск усередині Node-контейнера:
+
+```powershell
+docker compose exec node node scripts/ws-database-demo.js
+```
+
+- [`node-service/scripts/ws-database-demo.js:3-13`](node-service/scripts/ws-database-demo.js#L3-L13) — створює WebSocket-клієнта та накопичує отримані JSON-події.
+- [`node-service/scripts/ws-database-demo.js:16-24`](node-service/scripts/ws-database-demo.js#L16-L24) — очікує конкретну подію максимум 5 секунд; відсутність події вважається помилкою.
+- [`node-service/scripts/ws-database-demo.js:26-37`](node-service/scripts/ws-database-demo.js#L26-L37) — одночасно підключає двох клієнтів, створює ліцензію через HTTP/Repository і завершується успішно лише після отримання `license_created` обома клієнтами.
+
+Навіщо потрібен: доводить повний ланцюжок `HTTP POST → Service → Database Repository → event → WebSocket broadcast`, а також broadcast для кількох клієнтів.
+
+### `node-service/scripts/ws-demo.js` — базова демонстрація WebSocket із лабораторної №5
+
+Запуск:
+
+```powershell
+docker compose exec node node scripts/ws-demo.js
+```
+
+- [`node-service/scripts/ws-demo.js:3-17`](node-service/scripts/ws-demo.js#L3-L17) — відкриває два клієнти, після їх підключення надсилає валідне повідомлення, потім навмисно надсилає `invalid-json` і закриває з’єднання.
+- [`node-service/scripts/ws-demo.js:19-25`](node-service/scripts/ws-demo.js#L19-L25) — друкує відповіді для обох клієнтів і повертає ненульовий exit code при socket error.
+
+Навіщо потрібен: ізольовано демонструє broadcast і обробку некоректного повідомлення. На відміну від `ws-database-demo.js`, цей сценарій не створює запис у БД і залишений для демонстрації вимог попередньої лабораторної.
+
+### `bench/run-backpressure.ps1` — порівняння safe/unsafe stream processing
+
+Запуск, наприклад для файлу 100 MB і повільного consumer:
+
+```powershell
+.\bench\run-backpressure.ps1 -SizeMB 100 -SlowDelayMS 2
+```
+
+- [`bench/run-backpressure.ps1:1-6`](bench/run-backpressure.ps1#L1-L6) — приймає розмір тестових даних і штучну затримку consumer.
+- [`bench/run-backpressure.ps1:10-19`](bench/run-backpressure.ps1#L10-L19) — опитує endpoint стану, доки background job не завершиться або не поверне помилку.
+- [`bench/run-backpressure.ps1:21-38`](bench/run-backpressure.ps1#L21-L38) — запускає один сценарій і збирає runtime, режим, час, приріст пам’яті та кількість рядків.
+- [`bench/run-backpressure.ps1:40-49`](bench/run-backpressure.ps1#L40-L49) — генерує однакові source-файли та послідовно запускає `safe` і `unsafe` режими для Node та Go.
+- [`bench/run-backpressure.ps1:51-65`](bench/run-backpressure.ps1#L51-L65) — друкує таблицю та записує відтворюваний звіт у `bench/results.md`.
+
+Навіщо потрібен: чисельно демонструє backpressure із лабораторної №5. `safe` обмежує дані в пам’яті швидкістю consumer, тоді як `unsafe` накопичує їх перед записом. Скрипт не потрібен для звичайного запуску CRUD лабораторної №6.
+
+### Автоматичні init-скрипти баз даних
+
+Ці файли вручну запускати не потрібно: Docker виконує їх під час першого створення відповідного volume.
+
+- [`init.sql:1-25`](init.sql#L1-L25) — створює таблиці PostgreSQL, constraint-и та два початкові рахунки для транзакційної демонстрації.
+- [`mongo-init.js:1-3`](mongo-init.js#L1-L3) — створює у MongoDB унікальний індекс ключа ліцензії та індекс часу подій; collections створюються MongoDB автоматично під час `createIndex`.
+- [`docker-compose.yml:4-38`](docker-compose.yml#L4-L38) — монтує ці файли у стандартні init-каталоги офіційних образів PostgreSQL і MongoDB.
+
+Після звичайного `docker compose down` дані та volumes зберігаються, тому init-скрипти повторно не виконуються. Для повної чистої ініціалізації використовується `docker compose down -v`, але ця команда видаляє локальні дані лабораторних БД.
+
 ## Перемикання PostgreSQL ↔ MongoDB
 
 Змінюється лише один рядок у `.env`:
