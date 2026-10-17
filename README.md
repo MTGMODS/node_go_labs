@@ -1,130 +1,155 @@
-# node_go_labs
+# Лабораторна робота 6 — Persistence Layer у Node.js та Go
 
-Лабораторні роботи з порівняння серверних моделей **Node.js** і **Go**:
+Однакова система керування ліцензіями реалізована на Node.js/Express та Go/net/http. In-memory repository збережено для unit-тестів, а робоче сховище перемикається між PostgreSQL і MongoDB одним параметром `REPO_TYPE`. CRUD, validation, error handling, WebSocket і Streams працюють через однакові шари в обох runtime.
 
-- лабораторна 1: однаковий CRUD + `/health`;
-- лабораторна 2: I/O та CPU навантаження, блокування event loop, goroutines і benchmark;
-- лабораторна 3: автономний конкурентний pipeline на Go у папці `lab3/`;
-- лабораторна 4: багаторівневий `license-service` на Node.js та Go у папці `lab4/`;
-- лабораторна 5: Streams, Backpressure і WebSockets у папці `lab5/`.
+## Архітектура
 
-Тема — спрощений `license-service` з [license-management-platform](https://github.com/MTGMODS/license-management-platform): ліцензійні ключі в **спільній PostgreSQL**. Без JWT і ботів.
+```text
+HTTP → Router → Controller → Service → LicenseRepository interface/contract
+                                            ├── PostgreSQL repository
+                                            ├── MongoDB repository
+                                            └── InMemory repository (tests)
 
-## Що де лежить
+Service → Mongo EventLogger → events collection
+        └→ WebSocket Hub → усі підключені клієнти
 
-| Папка / сервіс | Стек | URL |
-| --- | --- | --- |
-| `node/` | Express | http://localhost:3000 |
-| `go/` | `net/http` | http://localhost:8080 |
-| `postgres/` | PostgreSQL 16 | localhost:5433 (`labs` / `labs` / `licenses`) |
-| `web/` | HTML + nginx | http://localhost:8081 |
-| `bench/` | k6 + PowerShell | сценарії лабораторної 2 |
-| `lab3/` | Go + окремий Docker Compose | конкурентний pipeline лабораторної 3 |
-| `lab4/` | Express + `net/http` | layered license-service, порти 3004 та 8084 |
-| `lab5/` | Node.js + Go + WebSockets | stream processing і real-time progress, порти 3005 та 8085 |
-
-Node і Go на комп ставити не потрібно. Потрібен лише Docker.
-
-```bash
-docker compose up --build
+PostgreSQL/MongoDB → batch reader → Stream/Transform → CSV file
+                                      └→ WebSocket export_progress
 ```
 
-Пісочниця замість curl: відкрий http://localhost:8081 — підпис, кнопка, відповідь сервера. Можна перемикати Node/Go; дані одні, бо БД спільна.
+Controller і бізнес-правила не залежать від конкретної БД. Factory вибирає реалізацію repository за `REPO_TYPE`. Node використовує pool розміром 15, Go — 40 з'єднань, що відповідає Event Loop та goroutines.
 
-Зупинити: `Ctrl+C`, потім `docker compose down`. Стерти дані БД: `docker compose down -v`.
+## Підготовка і запуск
 
-## API (однакове в обох сервісах)
+Файл `.env` не потрапляє в Git. Для першого запуску треба скопіювати `.env.example` у `.env` і заповнити всі значення. На ноутбуці для захисту `.env` уже підготовлено.
+
+```powershell
+cd C:\node_go_labs
+docker compose up --build -d
+docker compose ps
+```
+
+Після фінального перенесення проєкт запускається саме з кореня репозиторію. Node слухає `http://localhost:3006`, Go — `http://localhost:8086`; WebSocket endpoint — `/ws`.
+
+Швидка повна перевірка поточного repository:
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+Скрипт перевіряє health, CRUD між двома runtime через спільну реальну БД, `409 Conflict`, Mongo event log, `COMMIT`, `ROLLBACK` і обидва CSV exports.
+
+## Перемикання PostgreSQL ↔ MongoDB
+
+Змінюється лише один рядок у `.env`:
+
+```dotenv
+REPO_TYPE=postgres
+```
+
+або:
+
+```dotenv
+REPO_TYPE=mongo
+```
+
+Готова команда змінює цей рядок і перестворює лише застосунки, не торкаючись БД:
+
+```powershell
+.\scripts\switch-repository.ps1 -Type mongo
+.\scripts\smoke-test.ps1
+
+.\scripts\switch-repository.ps1 -Type postgres
+.\scripts\smoke-test.ps1
+```
+
+Service та Controller при перемиканні не змінюються.
+
+## HTTP API
+
+Основні endpoint однакові на портах `3006` і `8086`:
+
+- `GET /health`
+- `GET /api/licenses`
+- `GET /api/licenses/:id`
+- `POST /api/licenses`
+- `PUT /api/licenses/:id`
+- `DELETE /api/licenses/:id`
+- `GET /api/events?limit=50`
+- `GET /api/accounts`
+- `POST /api/accounts/transfer`
+- `GET /api/licenses/export?batch_size=100`
+- `GET /ws` через WebSocket Upgrade
+- endpoint лабораторної №5 у `/streams/*` також збережені
+
+Для сумісності CRUD доступний також через `/licenses`.
+
+Приклад ліцензії:
 
 ```json
 {
-  "id": 1,
-  "key": "MTGM-VIP1-AAAA-0001",
+  "key": "MTGM-LAB6-DEMO-0001",
   "product": "MTG MODS VIP",
-  "owner": "bogdan",
-  "status": "ACTIVE",
-  "duration_days": 30,
-  "max_devices": 2
+  "owner": "student"
 }
 ```
 
-`status`: `NOT_ACTIVATED` | `ACTIVE` | `EXPIRED` | `BANNED`.
+Дубль `key` перетворюється у `409 Conflict` і для PostgreSQL UNIQUE constraint, і для MongoDB unique index.
 
-Після першого старту є демо-запис `id=1` (скрипт `postgres/init.sql`). Далі дані живуть у Postgres, поки не зробиш `down -v`.
+## PostgreSQL transaction
 
-| Метод | Шлях | Код успіху | Що робить |
-| --- | --- | --- | --- |
-| `GET` | `/health` | 200 | статус сервера і БД |
-| `GET` | `/licenses` | 200 | список |
-| `GET` | `/licenses/:id` | 200 | одна ліцензія |
-| `POST` | `/licenses` | 201 | створити |
-| `PUT` | `/licenses/:id` | 200 | оновити (можна не всі поля) |
-| `DELETE` | `/licenses/:id` | 204 | видалити (тіла відповіді немає) |
+`POST /api/accounts/transfer` вручну бере connection із pool, виконує `BEGIN`, блокує обидва рахунки через `FOR UPDATE`, перевіряє баланс, робить два `UPDATE` і завершує `COMMIT`. Будь-яка помилка проходить через `ROLLBACK`; Node завжди викликає `release()`, Go — `defer tx.Rollback()`.
 
-Інші коди: **400** невалідне тіло/id, **404** немає такого id, **409** ключ уже існує, **405** метод не дозволений, **503** БД недоступна (`/health`).
-
-Обов'язкові поля на `POST`: `key`, `product`, `owner`. Якщо не передати інше: `status=NOT_ACTIVATED`, `duration_days=30`, `max_devices=1`.
-
-## curl (Windows)
-
-У PowerShell краще `curl.exe`.
+Успішний сценарій:
 
 ```powershell
-curl.exe http://localhost:3000/health
-curl.exe http://localhost:3000/licenses
-curl.exe -X POST http://localhost:3000/licenses -H "Content-Type: application/json" -d "{\"key\":\"MTGM-VIP1-AAAA-0002\",\"product\":\"MTG MODS VIP\",\"owner\":\"student\"}"
+curl.exe -X POST http://localhost:3006/api/accounts/transfer -H "Content-Type: application/json" -d "{\"from_account_id\":1,\"to_account_id\":2,\"amount\":10}"
 ```
 
-Те саме на `8080` для Go.
-
-## Аналогія з Python
-
-| Python | Node | Go |
-| --- | --- | --- |
-| `psycopg` + SQL | пакет `pg` у `store.js` | `database/sql` + `lib/pq` у `store.go` |
-| `@app.get("/licenses")` | `router.get("/")` | `mux.HandleFunc("GET /licenses", ...)` |
-| Pydantic | `readString` / `readInt` | `LicensePayload` + `applyPayload` |
-| `uvicorn` | `app.listen(...)` | `http.ListenAndServe(...)` |
-
-## Лабораторна 2: I/O та CPU
-
-Нові endpoint-и мають однакові параметри, щоб сервіси виконували однаковий обсяг роботи.
-
-| Runtime | Метод і шлях | Реалізація |
-| --- | --- | --- |
-| Node | `GET /io?delay_ms=1000` | асинхронний `setTimeout`, event loop не блокується |
-| Go | `GET /io?delay_ms=1000` | `time.Timer`, блокується лише goroutine запиту |
-| Node | `GET /cpu?iterations=75000000&tasks=4` | синхронні цикли в main thread |
-| Go | `GET /cpu` або `/cpu/sequential` | ті самі цикли послідовно |
-| Go | `GET /cpu/parallel` | ті самі цикли в окремих goroutines |
-
-У CPU-відповіді `result` завжди дорівнює `tasks * iterations`. Це підтверджує, що sequential та parallel варіанти виконали однаковий обсяг роботи.
-
-Швидка ручна перевірка:
+Rollback через недостатній баланс:
 
 ```powershell
-curl.exe "http://localhost:3000/io?delay_ms=1000"
-curl.exe "http://localhost:8080/io?delay_ms=1000"
-curl.exe "http://localhost:3000/cpu?iterations=75000000&tasks=4"
-curl.exe "http://localhost:8080/cpu/sequential?iterations=75000000&tasks=4"
-curl.exe "http://localhost:8080/cpu/parallel?iterations=75000000&tasks=4"
+curl.exe -X POST http://localhost:8086/api/accounts/transfer -H "Content-Type: application/json" -d "{\"from_account_id\":2,\"to_account_id\":1,\"amount\":999999}"
 ```
 
-Поведінка `/health` під час CPU-запиту:
+## Polyglot persistence та WebSocket
+
+Навіть коли основний CRUD працює через PostgreSQL, події `license_created`, `license_updated`, `license_deleted` незалежно записуються в MongoDB `events`. Та сама подія broadcast-иться всім WebSocket-клієнтам.
+
+Перевірка двох одночасних WebSocket-клієнтів:
 
 ```powershell
-./bench/check-health-during-cpu.ps1
+docker compose exec node node scripts/ws-database-demo.js
 ```
 
-Скрипт спочатку запускає важкий CPU-запит, потім надсилає п'ять `/health` запитів. Для Node перший health чекає завершення CPU-циклу. Go scheduler продовжує планувати health handler, тому він відповідає під час CPU-роботи.
+Скрипт підключає два клієнти, створює ліцензію через реальну БД і завершується лише тоді, коли обидва отримали `license_created`.
 
-Повний benchmark:
+## Stream export із Backpressure
+
+`GET /api/licenses/export` не виконує `FindAll` для всього набору. Repository читає ліцензії порціями через keyset pagination.
+
+- Node: `Readable.from()` → `Transform` (object → CSV) → `Writable`, об'єднані `stream.pipeline()`.
+- Go: producer читає batch-и та пише CSV в `io.Pipe`; запис блокується, поки consumer не прочитає дані.
+- Після кожного запису WebSocket отримує `export_progress`; наприкінці — `export_completed`.
+- Файли зберігаються у `data/node` і `data/go`, але не комітяться.
 
 ```powershell
-./bench/run-benchmarks.ps1
+curl.exe "http://localhost:3006/api/licenses/export?batch_size=100"
+curl.exe "http://localhost:8086/api/licenses/export?batch_size=100"
 ```
 
-Він послідовно запускає п'ять k6-сценаріїв, паралельно збирає `docker stats` і записує:
+## Тести
 
-- підсумкову таблицю в `bench/results.md`;
-- health-експеримент у `bench/health-results.md`;
-- raw JSON/CSV у `bench/results/`.
+Docker build автоматично запускає unit, Service, API, Streams і WebSocket тести. InMemory repository дозволяє тестувати Service без HTTP і без БД.
+
+```powershell
+docker compose build --no-cache node go
+.\scripts\smoke-test.ps1
+```
+
+Для повного чистого повтору, включно з повторним виконанням `init.sql` і `mongo-init.js`:
+
+```powershell
+docker compose down -v
+docker compose up --build -d
+```
